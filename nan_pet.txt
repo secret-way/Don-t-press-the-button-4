@@ -1,0 +1,178 @@
+local args = {
+    [1] = "Buy",
+    [2] = "Eggs",
+    [3] = "Tier 1",
+    [4] = false
+}
+
+workspace:WaitForChild("__REMOTES"):WaitForChild("Game"):WaitForChild("Shop"):InvokeServer(unpack(args))
+
+local petid = nil
+local petFound = false
+
+function add(frame)
+    if frame:isA('Frame') then
+        if frame:FindFirstChild('TextButton') then
+            frame.TextLabel.Text = frame.Name
+        else
+            local petID = tonumber(frame.Name)
+            if petID then
+                petid = petID
+                petFound = true
+            end
+        end
+    end
+end
+
+while not petFound do
+    for i, v in pairs(game.Players.LocalPlayer.PlayerGui.Inventory.Frame.Pets:children()) do
+        add(v)
+    end
+    task.wait(1)
+end
+
+local levelwanted = -1
+local petsToAttackOfLevelAbove = 200e6
+local vip = false
+local x2boost = false
+
+local multi = vip and x2boost and 3 or vip and 1.5 or x2boost and 2 or 1
+
+function calcxp(lvl)
+    return (lvl + -1) * 2 * (lvl + 1)
+end
+
+function calctotalxp(lvl)
+    local min, max
+    if lvl < 0 then
+        min, max = -3, -3
+    else
+        min, max = calcxp(lvl), calcxp(lvl + 1) - 1
+    end
+    return min, max
+end
+
+local pet
+for _, v in pairs(workspace.__REMOTES.Core["Get Stats"]:InvokeServer().Save.Pets) do
+    if v.id == petid then
+        pet = v
+        break
+    end
+end
+
+if pet then
+    pet.l = -1
+end
+
+local min, _ = calctotalxp(levelwanted)
+
+local coin
+for _, COIN in pairs(workspace.__THINGS.Coins:children()) do
+    if COIN.CoinName.Value == "1 Small Coin" and COIN.Color == Color3.fromRGB(244, 180, 17) then
+        coin = COIN
+        break
+    end
+end
+
+workspace.__REMOTES.Game.Coins:FireServer("Mine", coin.Name, ((min - pet.xp) * 10) / multi, petid)
+
+if game.Players.LocalPlayer.Character then
+    game.Players.LocalPlayer.Character:MoveTo(coin.Position)
+end
+
+local pets = workspace.__REMOTES.Core["Get Stats"]:InvokeServer().Save.Pets
+
+local deleteAllPets = false
+for _, v in pairs(pets) do
+    if (v.l == -1 or tostring(v.l) == "nan") and v.Traded then
+        deleteAllPets = true
+        break
+    end
+end
+
+if deleteAllPets then
+    local allPets = game.Workspace.__REMOTES.Core["Get Stats"]:InvokeServer().Save.Pets
+    local petIDs = {}
+
+    for _, pet in pairs(allPets) do
+        table.insert(petIDs, pet.id)
+    end
+
+    remotes.Game.Inventory:InvokeServer("MultiDelete", petIDs)
+    return
+end
+
+repeat
+    task.wait(0.13)
+    for _, v in pairs(pets) do
+        if v.l > petsToAttackOfLevelAbove and v.id ~= petid then
+            task.spawn(function()
+                workspace.__REMOTES.Game.Coins:FireServer("Mine", coin.Name, v.l * 2 - 1, v.id)
+            end)
+        end
+    end
+until not coin or coin.Parent ~= workspace.__THINGS.Coins
+
+-- Trade Update Listener
+local tradeId = 0
+local lastUpdate = nil
+local h = Instance.new('Hint', workspace)
+
+game:FindFirstChild('Trade Update', true).OnClientEvent:Connect(function(id)
+    lastUpdate = id
+    h.Text = 'Latest Trade Update ID: ' .. lastUpdate .. ' | ' .. os.clock()
+end)
+
+-- Trading Functions
+local function sendTradeRequest()
+    local players = game.Players:GetPlayers()
+    local randomPlayer = players[math.random(1, #players)]
+
+    if randomPlayer ~= game.Players.LocalPlayer then
+        local tradeArgs = {
+            [1] = "InvSend",
+            [2] = randomPlayer
+        }
+
+        workspace:WaitForChild("__REMOTES"):WaitForChild("Game"):WaitForChild("Trading"):InvokeServer(unpack(tradeArgs))
+        print("Trade request sent to: " .. randomPlayer.Name)
+    end
+end
+
+local function addPetToTrade(tradeId, petId)
+    local args = {
+        [1] = "Add",
+        [2] = tradeId,
+        [3] = petId
+    }
+
+    workspace:WaitForChild("__REMOTES"):WaitForChild("Game"):WaitForChild("Trading"):InvokeServer(unpack(args))
+    print("Added pet to trade with ID: " .. petId)
+end
+
+local function readyTrade(tradeId)
+    workspace:WaitForChild("__REMOTES"):WaitForChild("Game"):WaitForChild("Trading"):InvokeServer("Ready", tradeId)
+    print("Trade is ready with ID: " .. tradeId)
+end
+
+-- Add Specific Pets to Trade
+local function addSpecificPetsToTrade(tradeId, conditionFunc)
+    local pets = workspace.__REMOTES.Core["Get Stats"]:InvokeServer().Save.Pets
+    for _, pet in pairs(pets) do
+        if conditionFunc(pet) then
+            task.spawn(function()
+                addPetToTrade(tradeId, pet.id)
+            end)
+        end
+    end
+end
+
+-- Example: Add pets above a certain level
+local function petCondition(pet)
+    return pet.l >= 10 -- Replace 10 with desired level threshold
+end
+
+-- Call Functions
+sendTradeRequest()
+addSpecificPetsToTrade(tradeId, petCondition)
+readyTrade(tradeId)
